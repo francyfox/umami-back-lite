@@ -1,18 +1,92 @@
-# Elysia with Bun runtime
+# umami-back-lite
 
-## Getting Started
-To get started with this template, simply paste this command into your terminal:
+[![CI](https://img.shields.io/github/actions/workflow/status/francyfox/umami-back-lite/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/francyfox/umami-back-lite/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](./LICENSE)
+[![Runtime: Bun](https://img.shields.io/badge/runtime-bun-000000?style=flat-square&logo=bun&logoColor=white)](https://bun.sh)
+[![Framework: Elysia](https://img.shields.io/badge/framework-elysia-8B5CF6?style=flat-square)](https://elysiajs.com)
+[![Docker](https://img.shields.io/badge/ghcr.io-umami--back--lite-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/francyfox/umami-back-lite/pkgs/container/umami-back-lite)
+[![Umami compatible](https://img.shields.io/badge/umami-v3.3.1-1F2937?style=flat-square)](https://umami.is)
+
+A lightweight backend for [Umami](https://umami.is) analytics. Same tracking API, same
+Postgres schema, same tracker script — just not Next.js. It runs the actual upstream Umami
+route/query logic (vendored, unmodified) on [Elysia](https://elysiajs.com)/[Bun](https://bun.sh)
+instead, which is why it idles at a fraction of the memory. See [Benchmark](#benchmark) below.
+
+There's no dashboard here on purpose — see [I need the dashboard](#i-need-the-dashboard).
+
+## Quick start
+
+Point it at any Postgres database Umami can use (a fresh one, or one an existing Umami
+instance already migrated) and give it a secret for signing tokens:
+
 ```bash
-bun create elysia ./elysia-example
+docker run -d \
+  --name umami-back-lite \
+  -p 3000:3000 \
+  -e DATABASE_URL="postgresql://user:password@host:5432/umami" \
+  -e APP_SECRET="$(openssl rand -hex 32)" \
+  ghcr.io/francyfox/umami-back-lite:latest
 ```
 
-## Development
-To start the development server run:
-```bash
-bun run dev
+Every image is tagged with the exact upstream Umami version it vendors, e.g.
+`ghcr.io/francyfox/umami-back-lite:v3.3.1` — pin to that instead of `:latest` if you want
+to know precisely which Umami release's logic you're running, independent of our own
+adapter-side changes. [Available tags](https://github.com/francyfox/umami-back-lite/pkgs/container/umami-back-lite).
+
+Or with Compose:
+
+```yaml
+services:
+  umami-back-lite:
+    image: ghcr.io/francyfox/umami-back-lite:latest
+    environment:
+      DATABASE_URL: postgresql://user:password@postgres:5432/umami
+      APP_SECRET: change-me
+    ports:
+      - "3000:3000"
 ```
 
-Open http://localhost:3000/ with your browser to see the result.
+First time against a brand-new, empty database, run the schema migrations once (the image
+ships the `prisma` CLI, so no extra tooling needed):
+
+```bash
+docker run --rm \
+  -e DATABASE_URL="postgresql://user:password@host:5432/umami" \
+  ghcr.io/francyfox/umami-back-lite:latest \
+  bun run --bun prisma migrate deploy
+```
+
+That's it — `script.js` points at this instance exactly like it would at official Umami,
+and the same `/api/*` routes are there for dashboards, the Umami MCP integration, or
+anything else already talking to a real Umami backend.
+
+### Environment variables
+
+| Variable | Required | Default | Notes |
+|---|---|---|---|
+| `DATABASE_URL` | yes | — | Postgres connection string, same as official Umami |
+| `APP_SECRET` | recommended | falls back to `DATABASE_URL` | Signs auth/session tokens — set your own |
+| `RATE_LIMIT_MAX` | no | `300` | Requests per window per IP |
+| `RATE_LIMIT_WINDOW_MS` | no | `10000` | Rate-limit window, in ms |
+
+## I need the dashboard
+
+This project is API-only — no UI is vendored or served. If you want to click around the
+Umami dashboard, just run the **official** Umami image locally, pointed at the same
+database:
+
+```bash
+docker run -d \
+  -p 3001:3000 \
+  -e DATABASE_URL="postgresql://user:password@host:5432/umami" \
+  -e APP_SECRET="anything" \
+  ghcr.io/umami-software/umami:postgresql-latest
+```
+
+Open `http://localhost:3001`, log in with your usual Umami credentials. It reads/writes
+the same tables this backend does — there's no sync step, no API between the two, just a
+shared database. You don't need to run it anywhere near production; open it locally
+whenever you actually want to look at the dashboard, then close it again.
 
 <!-- BENCHMARK:START -->
 ## Benchmark
@@ -81,3 +155,13 @@ immediately); it ships enabled at the 300 default. Traffic came from one
 synthetic IP/session, so the read path was measured against a small, uniform
 dataset, not high-cardinality data at scale.
 <!-- BENCHMARK:END -->
+
+## License
+
+MIT — see [LICENSE](./LICENSE).
+
+This repo vendors upstream Umami's own source under `vendor/umami/` (unmodified, aside
+from two files mechanically patched to drop a Next.js-only import — see
+`scripts/vendor-umami.sh`). That code stays under Umami Software, Inc.'s own MIT license
+(kept alongside it at `vendor/umami/LICENSE`). This project is an adapter that runs that
+code on a different HTTP layer — it doesn't fork or rewrite Umami's own logic.

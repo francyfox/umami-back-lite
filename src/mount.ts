@@ -5,11 +5,11 @@ import { Glob } from "bun";
 // can't participate in that statically, so this intentionally takes `any`.
 type AnyElysia = any;
 
-const API_ROOT = new URL("../vendor/umami/src/app/api", import.meta.url)
+export const API_ROOT = new URL("../vendor/umami/src/app/api", import.meta.url)
   .pathname;
-const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
+export const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 
-function toElysiaPath(routeFile: string): string {
+export function toElysiaPath(routeFile: string): string {
   return (
     "/api/" +
     routeFile
@@ -41,6 +41,29 @@ export async function mountUmamiRoutes(app: AnyElysia) {
   }
 
   console.log(`Mounted ${count} umami route handlers from ${API_ROOT}`);
+
+  return app;
+}
+
+const COLLECT_ROOT = new URL("../vendor/umami/src/app/(collect)", import.meta.url)
+  .pathname;
+
+// Fixed, not globbed: only two files live under app/(collect) upstream (the
+// only vendored code that touched next/server — see scripts/vendor-umami.sh
+// for the mechanical NextResponse -> Response patch). A rename or a third
+// (collect) route upstream needs a matching update here.
+export async function mountCollectRoutes(app: AnyElysia) {
+  const pixel = await import(`${COLLECT_ROOT}/p/[slug]/route.ts`);
+  const link = await import(`${COLLECT_ROOT}/q/[slug]/route.ts`);
+
+  app.get("/p/:slug", ({ request, params }: { request: Request; params: Record<string, string> }) =>
+    pixel.GET(request, { params: Promise.resolve(params) }),
+  );
+  app.get("/q/:slug", ({ request, params }: { request: Request; params: Record<string, string> }) =>
+    link.GET(request, { params: Promise.resolve(params) }),
+  );
+
+  console.log("Mounted 2 umami collect route handlers (pixel beacon + short-link redirect)");
 
   return app;
 }

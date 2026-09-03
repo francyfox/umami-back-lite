@@ -31,6 +31,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Image gets tagged with this so `ghcr.io/.../umami-back-lite:v3.3.1`
+      # tells you exactly which upstream umami version's logic is inside,
+      # without needing to check UMAMI_VERSION or a commit inside the image.
+      - name: Read vendored umami version
+        id: umami_version
+        run: echo "version=$(cat vendor/umami/UMAMI_VERSION)" >> "$GITHUB_OUTPUT"
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
@@ -96,6 +103,7 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}:${{ github.sha }}
             ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ steps.umami_version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -107,5 +115,6 @@ jobs:
           sha_short="$(git rev-parse --short HEAD)"
           gh release create "$sha_short" \
             --title "$sha_short" \
-            --notes "Image: ghcr.io/${{ github.repository }}:${{ github.sha }}" \
+            --notes "Image: ghcr.io/${{ github.repository }}:${{ github.sha }}
+          Also tagged: ghcr.io/${{ github.repository }}:${{ steps.umami_version.outputs.version }} (umami ${{ steps.umami_version.outputs.version }})" \
             --target "${{ github.sha }}"
