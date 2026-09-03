@@ -5,6 +5,13 @@ import logixlysia from "logixlysia";
 import { mountCollectRoutes, mountRecorderScript, mountTrackerScript, mountUmamiRoutes } from "./mount";
 
 export async function createApp() {
+  // Tried `aot: false` (Elysia's non-compiled dispatch path) for the ~7MB
+  // RSS it saves — broke POST bodies. Our routes read the raw Request
+  // themselves (`request.json()` inside vendored parseRequest()) rather
+  // than using Elysia's `context.body`; the dynamic (non-AOT) handler path
+  // apparently consumes the body stream itself before our handler runs,
+  // so downstream `request.json()` sees nothing. Not worth chasing further
+  // for ~7MB — stick with the (default) AOT-compiled dispatcher.
   const app = new Elysia()
     .use(
       logixlysia({
