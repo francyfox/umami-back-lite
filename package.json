@@ -10,7 +10,7 @@
     "test:integration": "bun test tests/integration"
   },
   "dependencies": {
-    "@clickhouse/client": "^1.23.1",
+    "@clickhouse/client": "file:./local-shims/clickhouse-client",
     "@elysiajs/cors": "^1.4.2",
     "@prisma/adapter-pg": "7.10.0",
     "@prisma/client": "7.10.0",

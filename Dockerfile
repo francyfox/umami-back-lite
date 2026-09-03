@@ -2,6 +2,10 @@ FROM oven/bun:1
 WORKDIR /app
 
 COPY package.json bun.lock ./
+# @clickhouse/client resolves to this local shim (package.json's "file:"
+# dependency) — needs to exist before `bun install` runs, so it's copied
+# ahead of the main COPY . . below.
+COPY local-shims ./local-shims
 RUN bun install --frozen-lockfile
 
 COPY . .

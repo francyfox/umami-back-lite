@@ -22,8 +22,12 @@ already Next-free), the Prisma driver-adapter plan, and the milestone breakdown 
 live in `docs/umami-elysia-fork-plan.md` — read it before doing any nontrivial work here,
 especially before vendoring a new route group or touching the Prisma client setup.
 
-**Current status**: pre-M0 scaffold. `src/index.ts` is still the default Elysia template
-("Hello Elysia"); none of the vendoring/porting work has started yet.
+**Current status**: past M0/M1. The full `app/api/**` tree is vendored and mounted (no
+whitelist — see the git history for why), `src/app.ts`/`src/mount.ts` are real, CI builds
+and publishes to GHCR, and there's a benchmark + integration test suite. The rest of this
+file (below) predates that work and is stale in places — re-read the actual code
+(`src/`, `scripts/vendor-umami.sh`, `tests/integration/`) rather than trusting every
+detail here.
 
 ## Commands
 
@@ -57,6 +61,23 @@ especially before vendoring a new route group or touching the Prisma client setu
 - **Sync/CI intent**: eventual periodic sync of the vendored directories against new
   upstream Umami releases, gated by `tsc --noEmit` plus vendored + own tests, auto-deploy
   on green.
+- **Route mounting is lazy, deliberately** (`src/mount.ts`): which HTTP methods a
+  `route.ts` exports is detected by regexing its *source text*, not by importing it — the
+  actual `import()` happens inside the request handler, on first hit, and is memoized
+  after that. Importing all ~127 vendored route files eagerly at startup (the original
+  approach) cost real memory for features a given deployment likely never touches — e.g.
+  `@clickhouse/client` alone costs ~38MB RSS just to *import*, unconditionally, even
+  though nothing calls it unless `CLICKHOUSE_URL` is set. Measured effect: idle RSS before
+  any request dropped from ~124MB to ~28MB. `mountCollectRoutes` needs the same laziness
+  for the same reason — `q/[slug]/route.ts` statically imports `send/route.ts`'s `POST`,
+  so leaving that one eager silently reintroduces the same cost through a side door.
+  `@clickhouse/client` is further replaced at the dependency level with a local stub
+  (`local-shims/clickhouse-client`, wired via `package.json`'s `"file:"` dependency) that
+  throws if actually called — real gain here is smaller than the isolated import number
+  suggests once Prisma/pg are already loaded (shared transitive deps), but it's free and
+  correct so it stays. If you re-vendor and a new route file eagerly imports something
+  else heavy, the same pattern applies: don't patch the vendored file, either lean on the
+  existing laziness or add another local shim.
 
 ## Known environment gotcha
 
