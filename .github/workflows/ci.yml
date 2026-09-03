@@ -77,10 +77,16 @@ jobs:
           DATABASE_URL: "postgresql://umami:umami@localhost:5432/umami"
         run: bun run --bun prisma migrate deploy
 
+      # Needed for the "real public IP doesn't 500" regression test — see
+      # scripts/download-geo-db.ts.
+      - name: Download geo database
+        run: bun scripts/download-geo-db.ts geo/dbip-country-lite.mmdb
+
       - name: Integration test (our adapter)
         env:
           DATABASE_URL: "postgresql://umami:umami@localhost:5432/umami"
           APP_SECRET: ci-test-secret
+          GEOLITE_DB_PATH: "geo/dbip-country-lite.mmdb"
         run: bun run test:integration
 
       - name: Set up Docker Buildx

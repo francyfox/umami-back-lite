@@ -38,6 +38,9 @@ yarn-error.log*
 # generated prisma client (regenerated via `prisma generate`)
 /vendor/umami/src/generated
 
+# geo database (fetched via scripts/download-geo-db.ts)
+/geo
+
 **/*.trace
 **/*.zip
 **/*.tar.gz

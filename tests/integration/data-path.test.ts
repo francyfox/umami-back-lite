@@ -137,6 +137,38 @@ describe("send -> Postgres -> stats: a real pageview produces the exact expected
   });
 });
 
+// Regression test for a real production bug: getClientInfo() -> getLocation()
+// (vendor/umami/src/lib/detect.ts) throws opening the geo database for any
+// non-local IP, and nothing upstream of it catches that — every real visitor
+// hit a 500 until scripts/download-geo-db.ts started shipping one. Local/
+// Docker-network IPs (all the other tests above) never touch this code path
+// at all (isLocalIp short-circuits first), which is exactly how this went
+// unnoticed originally.
+describe("send with a real public IP populates country instead of 500ing", () => {
+  it("resolves a real IP to a country via the geo database", async () => {
+    const res = await request("/api/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "User-Agent": CHROME_UA },
+      body: JSON.stringify({
+        type: "event",
+        payload: {
+          website: websiteId,
+          url: "/geo-test",
+          hostname: HOSTNAME,
+          ip: "8.8.8.8", // Google DNS — stable, unambiguously non-local, real US IP
+        },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const sessionId = body.sessionId;
+
+    const session = await prismaClient.session.findUnique({ where: { id: sessionId } });
+    expect(session.country).toBe("US");
+  });
+});
+
 // Session replay and heatmap both save straight to Postgres via Prisma
 // (queries/sql/replays/saveRecording.ts, queries/sql/heatmap/saveHeatmapEvents.ts)
 // — no ClickHouse/Kafka/S3 involved unless CLICKHOUSE_URL is set, which we

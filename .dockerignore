@@ -2,6 +2,7 @@ node_modules
 .git
 .idea
 vendor/umami/src/generated
+geo
 .env
 .env.local
 *.log

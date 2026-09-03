@@ -68,6 +68,29 @@ anything else already talking to a real Umami backend.
 | `APP_SECRET` | recommended | falls back to `DATABASE_URL` | Signs auth/session tokens — set your own |
 | `RATE_LIMIT_MAX` | no | `300` | Requests per window per IP |
 | `RATE_LIMIT_WINDOW_MS` | no | `10000` | Rate-limit window, in ms |
+| `GEOLITE_DB_PATH` | no | pre-set in the image | Points at a geo database for IP -> country lookup — see [Geo lookups](#geo-lookups) |
+
+Everything else official Umami reads (`REDIS_URL`, `CLICKHOUSE_URL`, `KAFKA_*`,
+`DATABASE_REPLICA_URL`, `SALT_ROTATION`, `DISABLE_BOT_CHECK`, `CLOUD_MODE`, `LOG_QUERY`,
+`TWO_FACTOR_ENCRYPTION_KEY`, `IGNORE_IP`, and so on) is read the same way here — it's the
+same vendored code. The only things missing are dashboard/build/platform-only variables
+that don't apply to an API-only backend (`DEFAULT_LOCALE`, `DISABLE_UI`, `VERCEL`, etc.).
+
+### Geo lookups
+
+`/api/send` looks up the visitor's country from their IP
+(`vendor/umami/src/lib/detect.ts`). Official Umami's Docker image bakes in a full
+GeoLite2-City database at their own build time, using their own MaxMind license — we
+don't have one of those, and a full city-level database (theirs or any other) adds
+**~65–125MB of RSS** the moment the first real visitor IP is looked up, which would
+undo most of this project's memory advantage. Instead, the image ships a **country-only**
+database from [DB-IP's free Lite tier](https://db-ip.com/db/lite.php) (no account
+needed, ~11MB RSS) — you get `country`, not `city`/`region`. If you're behind Cloudflare,
+Vercel, or CloudFront, their geo headers are used automatically instead and this doesn't
+matter. Set `GEOLITE_DB_PATH` yourself to point at a real GeoLite2-City (or compatible
+MMDB) file if you want city-level data and can accept the memory cost.
+
+IP geolocation by [DB-IP](https://db-ip.com) (Country Lite, CC BY 4.0).
 
 ## I need the dashboard
 
