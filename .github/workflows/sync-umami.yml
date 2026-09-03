@@ -57,7 +57,7 @@ jobs:
             --title "chore: sync umami ${VERSION}" \
             --body "Automated vendor sync to umami-software/umami@${VERSION}. Merges automatically once CI is green." \
             --head "$branch" \
-            --base main)"
+            --base master)"
 
           # Requires auto-merge to be enabled on the repo; falls back to a plain
           # open PR (manual merge) if that setting is off.

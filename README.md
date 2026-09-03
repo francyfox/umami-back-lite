@@ -1,6 +1,6 @@
 # umami-back-lite
 
-[![CI](https://img.shields.io/github/actions/workflow/status/francyfox/umami-back-lite/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/francyfox/umami-back-lite/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/francyfox/umami-back-lite/ci.yml?branch=master&style=flat-square&label=CI)](https://github.com/francyfox/umami-back-lite/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](./LICENSE)
 [![Runtime: Bun](https://img.shields.io/badge/runtime-bun-000000?style=flat-square&logo=bun&logoColor=white)](https://bun.sh)
 [![Framework: Elysia](https://img.shields.io/badge/framework-elysia-8B5CF6?style=flat-square)](https://elysiajs.com)
