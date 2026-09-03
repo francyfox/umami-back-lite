@@ -3,25 +3,25 @@
     "label": "ours",
     "baseUrl": "http://localhost:3000",
     "container": "umami-back-lite-app-1",
-    "measuredAt": "2026-09-03T13:47:55.546Z",
-    "idleMemMiB": 134.5,
+    "measuredAt": "2026-09-03T17:12:28.688Z",
+    "idleMemMiB": 126.8,
     "write": {
-      "reqPerSec": 837.33,
+      "reqPerSec": 895.92,
       "failedRequests": 0,
-      "p50": 58,
-      "p95": 75,
-      "p99": 88,
-      "peakMemMiB": 239.3,
-      "peakCpuPct": 151.14
+      "p50": 54,
+      "p95": 70,
+      "p99": 83,
+      "peakMemMiB": 256.2,
+      "peakCpuPct": 136.13
     },
     "read": {
-      "reqPerSec": 114.09,
+      "reqPerSec": 148.58,
       "failedRequests": 0,
-      "p50": 255,
-      "p95": 315,
-      "p99": 341,
-      "peakMemMiB": 230.5,
-      "peakCpuPct": 89.94
+      "p50": 196,
+      "p95": 238,
+      "p99": 304,
+      "peakMemMiB": 246.3,
+      "peakCpuPct": 101.55
     }
   },
   "official": {

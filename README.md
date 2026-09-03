@@ -138,7 +138,7 @@ xychart-beta
     title "Throughput (req/s, higher is better)"
     x-axis ["ours · write", "official · write", "ours · read", "official · read"]
     y-axis "req/s" 0 --> 900
-    bar [837, 280, 114, 109]
+    bar [896, 280, 149, 109]
 ```
 
 ```mermaid
@@ -146,7 +146,7 @@ xychart-beta
     title "Median latency, ms (lower is better)"
     x-axis ["ours · write", "official · write", "ours · read", "official · read"]
     y-axis "ms" 0 --> 300
-    bar [58, 167, 255, 265]
+    bar [54, 167, 196, 265]
 ```
 
 ```mermaid
@@ -154,28 +154,28 @@ xychart-beta
     title "Peak memory, MiB (lower is better)"
     x-axis ["ours · idle", "official · idle", "ours · write", "official · write", "ours · read", "official · read"]
     y-axis "MiB" 0 --> 750
-    bar [135, 264, 239, 602, 231, 711]
+    bar [127, 264, 256, 602, 246, 711]
 ```
 
 ```mermaid
 xychart-beta
     title "Peak CPU, % of one core (lower is better)"
     x-axis ["ours · write", "official · write", "ours · read", "official · read"]
-    y-axis "%" 0 --> 175
-    bar [151, 150, 90, 112]
+    y-axis "%" 0 --> 150
+    bar [136, 150, 102, 112]
 ```
 
 | Metric | umami-back-lite | official umami | difference |
 |---|---:|---:|---:|
-| Write — req/s | **837.3** | 279.6 | 2.99× |
-| Write — p50 / p95 / p99 (ms) | **58 / 75 / 88** | 167 / 235 / 257 | 2.88× faster |
-| Write — peak mem (MiB) | **239.3** | 601.9 | 60.2% less |
-| Write — peak CPU (%) | **151.1** | 149.6 | 1% more |
-| Read — req/s | **114.1** | 108.6 | 1.05× |
-| Read — p50 / p95 / p99 (ms) | **255 / 315 / 341** | 265 / 310 / 358 | 1.04× faster |
-| Read — peak mem (MiB) | **230.5** | 710.6 | 67.6% less |
-| Read — peak CPU (%) | **89.9** | 111.8 | 19.5% less |
-| Idle memory (MiB) | **134.5** | 264.4 | 49.1% less |
+| Write — req/s | **895.9** | 279.6 | 3.2× |
+| Write — p50 / p95 / p99 (ms) | **54 / 70 / 83** | 167 / 235 / 257 | 3.09× faster |
+| Write — peak mem (MiB) | **256.2** | 601.9 | 57.4% less |
+| Write — peak CPU (%) | **136.1** | 149.6 | 9% less |
+| Read — req/s | **148.6** | 108.6 | 1.37× |
+| Read — p50 / p95 / p99 (ms) | **196 / 238 / 304** | 265 / 310 / 358 | 1.35× faster |
+| Read — peak mem (MiB) | **246.3** | 710.6 | 65.3% less |
+| Read — peak CPU (%) | **101.6** | 111.8 | 9.1% less |
+| Idle memory (MiB) | **126.8** | 264.4 | 52% less |
 
 **Caveats:** both backends ran as sibling containers on one Docker host, so
 absolute numbers are host-specific — the side-by-side comparison is the
@@ -186,6 +186,14 @@ immediately); it ships enabled at the 300 default. Traffic came from one
 synthetic IP/session, so the read path was measured against a small, uniform
 dataset, not high-cardinality data at scale.
 <!-- BENCHMARK:END -->
+
+**Cold boot, measured separately (not part of the table above, different methodology):**
+routes are mounted lazily — a route's module only imports on its *first* real request, not
+at startup (see `src/mount.ts`). RSS right after container start, before any request at
+all, is **~28MB**. The 126.8MB "Idle" row above already reflects a couple of setup
+requests (login, create-website) that the benchmark script itself makes before sampling —
+it's the fairer number for comparing against official Umami under identical conditions,
+but 28MB is the more honest answer to "how light is this at boot."
 
 ## License
 
