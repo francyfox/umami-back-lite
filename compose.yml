@@ -1,0 +1,56 @@
+# Local dev/testing only — NOT the production compose (that's M2).
+#
+# Spins up a throwaway Postgres, the official upstream Umami image, and our
+# own backend, all pointed at the same DB — lets us diff responses and
+# compare resource usage between the two implementations on identical data.
+#
+# Usage:
+#   docker compose up -d --build
+#   # official umami: http://localhost:3001
+#   # our backend:    http://localhost:3000
+#   docker compose down -v   # tear down + wipe the DB
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: umami
+      POSTGRES_PASSWORD: umami
+      POSTGRES_DB: umami
+    ports:
+      - "5432:5432"
+    volumes:
+      - umami-dev-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U umami"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  umami:
+    image: ghcr.io/umami-software/umami:postgresql-latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://umami:umami@postgres:5432/umami
+      APP_SECRET: dev-secret-placeholder-change-me
+    ports:
+      - "3001:3000"
+
+  app:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://umami:umami@postgres:5432/umami
+      APP_SECRET: dev-secret-placeholder-change-me
+      # Raise for a raw-capacity benchmark run: RATE_LIMIT_MAX=1000000 docker
+      # compose up -d app — no rebuild needed, restore with a plain `up -d app`.
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-300}
+    ports:
+      - "3000:3000"
+
+volumes:
+  umami-dev-db:

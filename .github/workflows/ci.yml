@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: umami
+          POSTGRES_PASSWORD: umami
+          POSTGRES_DB: umami
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U umami"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bunx tsc --noEmit
+
+      # Needed before any test that touches vendored lib/queries code, even
+      # the mocked-DB unit tests below — several files import the generated
+      # client directly regardless of whether a given test mocks it.
+      - name: Generate Prisma client
+        run: bun run --bun --env-file=.env.build prisma generate
+
+      # Vendored *.test.ts files are vitest tests (upstream's own `vitest run`);
+      # `bun test`'s vitest-compat shim doesn't fully support `vi.mock` with async
+      # factories and can hang, so this runs them under real vitest instead
+      # (see vitest.config.ts for the `@/*` alias). DATABASE_URL just needs to be
+      # syntactically valid — these are unit tests against mocked DB calls.
+      - name: Unit test (vendored lib/queries/permissions)
+        env:
+          DATABASE_URL: "postgresql://user:password@localhost:5432/umami"
+        run: bun run test
+
+      # This is the actual pre-deploy gate: proves a real HTTP request makes
+      # it through OUR adapter (src/mount.ts's path-param conversion, method
+      # dispatch, src/app.ts's plugin wiring) into a vendored route handler
+      # and back — the unit tests above never touch Elysia at all. Runs
+      # against the real `postgres` service above, migrated fresh each run.
+      - name: Migrate integration DB
+        env:
+          DATABASE_URL: "postgresql://umami:umami@localhost:5432/umami"
+        run: bun run --bun prisma migrate deploy
+
+      - name: Integration test (our adapter)
+        env:
+          DATABASE_URL: "postgresql://umami:umami@localhost:5432/umami"
+          APP_SECRET: ci-test-secret
+        run: bun run test:integration
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # TODO: image tag / release format may need to match the existing shalotts
+      # VPS poller's contract (tag naming, asset shape) — confirm before relying
+      # on this for auto-deploy (see plan M2/M3).
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name == 'push' }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+            ghcr.io/${{ github.repository }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Create release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sha_short="$(git rev-parse --short HEAD)"
+          gh release create "$sha_short" \
+            --title "$sha_short" \
+            --notes "Image: ghcr.io/${{ github.repository }}:${{ github.sha }}" \
+            --target "${{ github.sha }}"

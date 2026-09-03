@@ -1,0 +1,7 @@
+node_modules
+.git
+.idea
+vendor/umami/src/generated
+.env
+.env.local
+*.log

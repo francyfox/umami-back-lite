@@ -1,0 +1,52 @@
+{
+  "ours": {
+    "label": "ours",
+    "baseUrl": "http://localhost:3000",
+    "container": "umami-back-lite-app-1",
+    "measuredAt": "2026-09-03T13:47:55.546Z",
+    "idleMemMiB": 134.5,
+    "write": {
+      "reqPerSec": 837.33,
+      "failedRequests": 0,
+      "p50": 58,
+      "p95": 75,
+      "p99": 88,
+      "peakMemMiB": 239.3,
+      "peakCpuPct": 151.14
+    },
+    "read": {
+      "reqPerSec": 114.09,
+      "failedRequests": 0,
+      "p50": 255,
+      "p95": 315,
+      "p99": 341,
+      "peakMemMiB": 230.5,
+      "peakCpuPct": 89.94
+    }
+  },
+  "official": {
+    "label": "official",
+    "baseUrl": "http://localhost:3001",
+    "container": "umami-back-lite-umami-1",
+    "measuredAt": "2026-09-03T13:45:09.560Z",
+    "idleMemMiB": 264.4,
+    "write": {
+      "reqPerSec": 279.6,
+      "failedRequests": 0,
+      "p50": 167,
+      "p95": 235,
+      "p99": 257,
+      "peakMemMiB": 601.9,
+      "peakCpuPct": 149.64
+    },
+    "read": {
+      "reqPerSec": 108.64,
+      "failedRequests": 0,
+      "p50": 265,
+      "p95": 310,
+      "p99": 358,
+      "peakMemMiB": 710.6,
+      "peakCpuPct": 111.75
+    }
+  }
+}

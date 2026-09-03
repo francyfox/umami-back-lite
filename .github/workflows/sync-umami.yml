@@ -1,0 +1,64 @@
+name: Sync upstream Umami
+
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check latest upstream release
+        id: check
+        run: |
+          latest="$(gh api repos/umami-software/umami/releases/latest --jq .tag_name)"
+          current="$(cat vendor/umami/UMAMI_VERSION 2>/dev/null || echo '')"
+
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+
+          if [ "$latest" = "$current" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Vendor new version
+        if: steps.check.outputs.changed == 'true'
+        run: scripts/vendor-umami.sh "${{ steps.check.outputs.latest }}"
+
+      - name: Open sync PR
+        if: steps.check.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.check.outputs.latest }}
+        run: |
+          branch="sync/umami-${VERSION}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "$branch"
+          git add -A vendor/umami
+          git commit -m "chore: sync umami ${VERSION}"
+          git push origin "$branch"
+
+          pr_url="$(gh pr create \
+            --title "chore: sync umami ${VERSION}" \
+            --body "Automated vendor sync to umami-software/umami@${VERSION}. Merges automatically once CI is green." \
+            --head "$branch" \
+            --base main)"
+
+          # Requires auto-merge to be enabled on the repo; falls back to a plain
+          # open PR (manual merge) if that setting is off.
+          gh pr merge --auto --squash "$pr_url" || true
