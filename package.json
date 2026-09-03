@@ -7,7 +7,9 @@
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
     "test": "vitest run",
-    "test:integration": "bun test tests/integration"
+    "test:integration": "bun test tests/integration",
+    "build": "bun scripts/generate-route-manifest.ts && bun --bun x tsdown",
+    "start:bundled": "bun run dist/index.build.mjs"
   },
   "dependencies": {
     "@clickhouse/client": "file:./local-shims/clickhouse-client",
@@ -44,10 +46,11 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@tanstack/react-query": "^5.101.4",
     "bun-types": "1.4.0",
     "prisma": "7.10.0",
+    "tsdown": "^0.23.0",
     "typescript": "7.0.2",
-    "vitest": "^4.1.10",
-    "@tanstack/react-query": "^5.101.4"
+    "vitest": "^4.1.10"
   }
 }

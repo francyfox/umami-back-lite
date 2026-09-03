@@ -190,10 +190,19 @@ dataset, not high-cardinality data at scale.
 **Cold boot, measured separately (not part of the table above, different methodology):**
 routes are mounted lazily — a route's module only imports on its *first* real request, not
 at startup (see `src/mount.ts`). RSS right after container start, before any request at
-all, is **~28MB**. The 126.8MB "Idle" row above already reflects a couple of setup
+all, is **~24MB**. The 126.8MB "Idle" row above already reflects a couple of setup
 requests (login, create-website) that the benchmark script itself makes before sampling —
 it's the fairer number for comparing against official Umami under identical conditions,
-but 28MB is the more honest answer to "how light is this at boot."
+but 24MB is the more honest answer to "how light is this at boot."
+
+The image runs a bundled build (`bun run build` — see `tsdown.config.ts`,
+`scripts/generate-route-manifest.ts`) rather than `src/index.ts` directly: routes still
+mount lazily exactly as described above, but the route table itself is precomputed at
+build time instead of scanned from disk at startup, which is where the boot-time win
+above comes from (measured ~78ms vs. ~115ms to ready in isolated testing). `node_modules`
+still ships in the image regardless (needed for the `prisma migrate deploy` step above),
+so this isn't an image-size optimization — see `CLAUDE.md` for why bundling was kept
+anyway.
 
 ## License
 

@@ -2,9 +2,24 @@ import { Elysia } from "elysia";
 import cors from "@elysiajs/cors";
 import { rateLimit } from "elysia-rate-limit";
 import logixlysia from "logixlysia";
-import { mountCollectRoutes, mountRecorderScript, mountTrackerScript, mountUmamiRoutes } from "./mount";
+import {
+  mountCollectRoutes,
+  mountRecorderScript,
+  mountRouteEntries,
+  mountTrackerScript,
+  mountUmamiRoutes,
+  type RouteEntry,
+} from "./mount";
 
-export async function createApp() {
+export type CreateAppOptions = {
+  // Pre-resolved route entries (from route-manifest.generated.ts) for the
+  // bundled build — see src/index.build.ts. Omitted (the normal dev/Docker
+  // path): routes are discovered via mount.ts's own runtime Bun.Glob scan.
+  apiRoutes?: RouteEntry[];
+  collectRoutes?: RouteEntry[];
+};
+
+export async function createApp(options: CreateAppOptions = {}) {
   // Tried `aot: false` (Elysia's non-compiled dispatch path) for the ~7MB
   // RSS it saves — broke POST bodies. Our routes read the raw Request
   // themselves (`request.json()` inside vendored parseRequest()) rather
@@ -43,8 +58,20 @@ export async function createApp() {
       }),
     );
 
-  await mountUmamiRoutes(app);
-  await mountCollectRoutes(app);
+  if (options.apiRoutes) {
+    const count = mountRouteEntries(app, options.apiRoutes);
+    console.log(`Mounted ${count} umami route handlers from route-manifest.generated.ts`);
+  } else {
+    await mountUmamiRoutes(app);
+  }
+
+  if (options.collectRoutes) {
+    mountRouteEntries(app, options.collectRoutes);
+    console.log("Mounted 2 umami collect route handlers from route-manifest.generated.ts");
+  } else {
+    await mountCollectRoutes(app);
+  }
+
   await mountTrackerScript(app);
   await mountRecorderScript(app);
 

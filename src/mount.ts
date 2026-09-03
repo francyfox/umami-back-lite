@@ -22,10 +22,68 @@ export function toElysiaPath(routeFile: string): string {
 
 const METHOD_EXPORT_RE = /^export\s+async\s+function\s+(GET|POST|PUT|PATCH|DELETE)\s*\(/gm;
 
+// A route's existence + methods, independent of *how* its module gets
+// loaded — shared by the runtime scanner (mountUmamiRoutes, below) and
+// scripts/generate-route-manifest.ts (which needs the plain relative file,
+// not a bound loader, so it can emit a literal `import("...")` string a
+// bundler can see statically — see that script for why).
+export type ApiRouteInfo = {
+  path: string;
+  methods: (typeof METHODS)[number][];
+  file: string; // relative to API_ROOT, e.g. "auth/login/route.ts"
+};
+
 // Which methods a route.ts exports is detected by reading its *source text*
 // (cheap — no module evaluation, no transitive npm deps loaded), not by
-// importing it. The actual `import()` only happens inside the handler, on
-// the first real request to that specific route, and is cached after that.
+// importing it.
+export async function scanApiRoutes(): Promise<ApiRouteInfo[]> {
+  const glob = new Glob("**/route.ts");
+  const out: ApiRouteInfo[] = [];
+
+  for await (const file of glob.scan(API_ROOT)) {
+    const text = await Bun.file(`${API_ROOT}/${file}`).text();
+    const methods = [...text.matchAll(METHOD_EXPORT_RE)]
+      .map((m) => m[1])
+      .filter((m): m is (typeof METHODS)[number] => (METHODS as readonly string[]).includes(m));
+
+    if (methods.length) out.push({ path: toElysiaPath(file), methods, file });
+  }
+
+  return out;
+}
+
+export type RouteEntry = {
+  path: string;
+  methods: readonly string[];
+  load: () => Promise<any>;
+};
+
+// Registers already-resolved entries (each with its own loader) — used both
+// by mountUmamiRoutes below (loaders close over a runtime-computed path) and
+// by the bundled-build entrypoint (loaders come from route-manifest.generated.ts,
+// where each loader is a literal `import("...")`  a bundler can see and
+// inline — see scripts/generate-route-manifest.ts).
+export function mountRouteEntries(app: AnyElysia, entries: RouteEntry[]): number {
+  let count = 0;
+
+  for (const entry of entries) {
+    for (const method of entry.methods) {
+      app[method.toLowerCase()](
+        entry.path,
+        async ({ request, params }: { request: Request; params: Record<string, string> }) => {
+          const mod = await entry.load();
+          return mod[method](request, { params: Promise.resolve(params) });
+        },
+      );
+      count++;
+    }
+  }
+
+  return count;
+}
+
+// The actual `import()` only happens inside the handler, on the first real
+// request to that specific route, and is cached after that.
 //
 // Why this matters: many vendored route.ts files eagerly import genuinely
 // heavy, rarely-used dependencies (e.g. @clickhouse/client alone costs
@@ -36,68 +94,47 @@ const METHOD_EXPORT_RE = /^export\s+async\s+function\s+(GET|POST|PUT|PATCH|DELET
 // whether or not a given deployment ever uses it. This way, a deployment
 // that only ever hits send/stats/websites/reports never pays for the rest.
 export async function mountUmamiRoutes(app: AnyElysia) {
-  const glob = new Glob("**/route.ts");
-  let count = 0;
+  const infos = await scanApiRoutes();
 
-  for await (const file of glob.scan(API_ROOT)) {
-    const path = toElysiaPath(file);
-    const filePath = `${API_ROOT}/${file}`;
-    const text = await Bun.file(filePath).text();
-    const methods = [...text.matchAll(METHOD_EXPORT_RE)]
-      .map((m) => m[1])
-      .filter((m): m is (typeof METHODS)[number] => (METHODS as readonly string[]).includes(m));
-
-    if (!methods.length) continue;
-
+  const entries: RouteEntry[] = infos.map((info) => {
+    const filePath = `${API_ROOT}/${info.file}`;
     let modPromise: Promise<any> | undefined;
-    const getMod = () => (modPromise ??= import(filePath));
+    return { path: info.path, methods: info.methods, load: () => (modPromise ??= import(filePath)) };
+  });
 
-    for (const method of methods) {
-      app[method.toLowerCase()](
-        path,
-        async ({ request, params }: { request: Request; params: Record<string, string> }) => {
-          const mod = await getMod();
-          return mod[method](request, { params: Promise.resolve(params) });
-        },
-      );
-      count++;
-    }
-  }
+  const count = mountRouteEntries(app, entries);
 
   console.log(`Mounted ${count} umami route handlers from ${API_ROOT} (lazy — imported on first hit)`);
 
   return app;
 }
 
-const COLLECT_ROOT = new URL("../vendor/umami/src/app/(collect)", import.meta.url)
+export const COLLECT_ROOT = new URL("../vendor/umami/src/app/(collect)", import.meta.url)
   .pathname;
 
 // Fixed, not globbed: only two files live under app/(collect) upstream (the
 // only vendored code that touched next/server — see scripts/vendor-umami.sh
 // for the mechanical NextResponse -> Response patch). A rename or a third
-// (collect) route upstream needs a matching update here.
-//
+// (collect) route upstream needs a matching update here — and in
+// scripts/generate-route-manifest.ts, which reuses this same list.
+export const COLLECT_ROUTES: ApiRouteInfo[] = [
+  { path: "/p/:slug", methods: ["GET"], file: "p/[slug]/route.ts" },
+  { path: "/q/:slug", methods: ["GET"], file: "q/[slug]/route.ts" },
+];
+
 // Lazy for the same reason as mountUmamiRoutes: q/[slug]/route.ts does
 // `import { POST } from '@/app/api/send/route'` at the top of the file —
 // eagerly importing this one small file was dragging in send/route.ts's
 // entire dependency chain (clickhouse et al) unconditionally, which is
 // exactly the cost mountUmamiRoutes' own laziness was trying to avoid.
 export async function mountCollectRoutes(app: AnyElysia) {
-  let pixelPromise: Promise<any> | undefined;
-  let linkPromise: Promise<any> | undefined;
-  const getPixel = () => (pixelPromise ??= import(`${COLLECT_ROOT}/p/[slug]/route.ts`));
-  const getLink = () => (linkPromise ??= import(`${COLLECT_ROOT}/q/[slug]/route.ts`));
+  const entries: RouteEntry[] = COLLECT_ROUTES.map((info) => {
+    const filePath = `${COLLECT_ROOT}/${info.file}`;
+    let modPromise: Promise<any> | undefined;
+    return { path: info.path, methods: info.methods, load: () => (modPromise ??= import(filePath)) };
+  });
 
-  app.get(
-    "/p/:slug",
-    async ({ request, params }: { request: Request; params: Record<string, string> }) =>
-      (await getPixel()).GET(request, { params: Promise.resolve(params) }),
-  );
-  app.get(
-    "/q/:slug",
-    async ({ request, params }: { request: Request; params: Record<string, string> }) =>
-      (await getLink()).GET(request, { params: Promise.resolve(params) }),
-  );
+  mountRouteEntries(app, entries);
 
   console.log("Mounted 2 umami collect route handlers (pixel beacon + short-link redirect, lazy)");
 

@@ -41,6 +41,10 @@ yarn-error.log*
 # geo database (fetched via scripts/download-geo-db.ts)
 /geo
 
+# bundled-build artifacts (see scripts/generate-route-manifest.ts, src/index.build.ts)
+/dist
+/src/route-manifest.generated.ts
+
 **/*.trace
 **/*.zip
 **/*.tar.gz

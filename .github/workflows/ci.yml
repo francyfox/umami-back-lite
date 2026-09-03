@@ -54,6 +54,13 @@ jobs:
       - name: Generate Prisma client
         run: bun run --bun --env-file=.env.build prisma generate
 
+      # src/index.build.ts (the bundled-build entrypoint — see scripts/
+      # generate-route-manifest.ts and `bun run build`) imports this
+      # generated, gitignored file; needed before typecheck can see it. No DB
+      # needed — same source-text scan mount.ts does at runtime.
+      - name: Generate route manifest
+        run: bun scripts/generate-route-manifest.ts
+
       - name: Typecheck
         run: bunx tsc --noEmit
 
@@ -88,6 +95,16 @@ jobs:
           APP_SECRET: ci-test-secret
           GEOLITE_DB_PATH: "geo/dbip-country-lite.mmdb"
         run: bun run test:integration
+
+      # Not wired into the shipped Docker image (see CLAUDE.md /
+      # tsdown.config.ts for why: it eliminates node_modules from a deploy,
+      # but we keep node_modules for the `prisma migrate deploy` workflow
+      # anyway, so there's currently no RSS or size win from using it in
+      # prod). Kept building in CI so a future vendor-sync can't silently
+      # break it unnoticed — `bun run build` alone catches drift (e.g. a new
+      # route.ts introducing another broken-exports-map dependency).
+      - name: Build (bundled entrypoint smoke check)
+        run: bun run build
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

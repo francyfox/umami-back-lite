@@ -79,6 +79,55 @@ detail here.
   else heavy, the same pattern applies: don't patch the vendored file, either lean on the
   existing laziness or add another local shim.
 
+- **Bundled build** (`bun run build` → `tsdown.config.ts`, `scripts/generate-route-manifest.ts`,
+  `src/index.build.ts`; production `CMD` in `Dockerfile`): a *separate* entrypoint from
+  `src/index.ts`, not a replacement. `mountUmamiRoutes`'s runtime `import(filePath)` (see
+  above) is invisible to any bundler's static analysis — a `filePath` computed from a
+  `Bun.Glob` scan can't be traced, so a plain `bun build`/`esbuild`/`tsdown` of
+  `src/index.ts` doesn't actually pull in the vendored route code at all (Prisma, bcryptjs,
+  jsonwebtoken, ...) — it silently produces a tiny bundle that still needs `node_modules`
+  on disk for anything DB-backed, defeating the point. Fix: `scripts/generate-route-manifest.ts`
+  runs the *same* route-detection logic (`mount.ts`'s `scanApiRoutes`) at build time and
+  emits *literal* `import("../vendor/.../route.ts")` strings into a generated,
+  gitignored `src/route-manifest.generated.ts` — a bundler can see a string literal, so
+  everything a route transitively imports gets pulled into the bundle graph, while each
+  loader stays a separate `import()` (not a static top-level import), so lazy-loading
+  semantics are preserved — verified: cold RSS is the same as unbundled, not the
+  eager-import regression this whole lazy-mounting design exists to avoid. `src/app.ts`'s
+  `createApp()` takes optional `{ apiRoutes, collectRoutes }` (pre-built `RouteEntry[]`
+  from the manifest) — omitted (the normal dev/Docker-via-`src/index.ts` path), it falls
+  back to `mountUmamiRoutes`'s own runtime scan.
+  Bundler choice matters: `bun build`'s own resolver chokes on `file-type` (Elysia's own
+  optional dynamic import, wrapped in `.catch()` for exactly this "not installed" case) —
+  its transitive dep `strtok3` has a broken `package.json` `exports` map (same bug class as
+  the `@sinclair/typebox` cache-corruption gotcha below); mark `file-type` external to work
+  around it (already done in `tsdown.config.ts`). Picked `tsdown` (Rolldown) over plain
+  `bun build`/`esbuild` specifically because it code-splits each dynamic `import()` into
+  its own chunk file by default — `bun build`'s single-`--outfile` mode inlines everything,
+  which still preserves *evaluation* laziness (dynamically-imported modules are wrapped in
+  a lazily-invoked init function, not eagerly run) but not *parse* laziness, and measured
+  ~40MB higher cold RSS as a result; `bun build --outdir --splitting --target bun` also
+  code-splits and measured about the same as tsdown, so either works — tsdown's chunk
+  naming/config ergonomics were just nicer to work with.
+  Real, measured wins: ~24MB cold-boot RSS instead of ~28MB, and ~78ms to ready instead of
+  ~115ms (skips `mountUmamiRoutes`'s startup-time glob scan + per-file regex parse across
+  127 files — the manifest is precomputed). Under concurrent load (`ab`, matching
+  `scripts/bench.ts`'s write/read profile), an isolated bare-process A/B showed a real gap
+  (~2000 vs ~1740 req/s write, p99 38ms vs 84ms) but a same-conditions Docker A/B (same
+  host, same competing containers) showed it mostly evaporate on the write path (noise —
+  894 vs 909 req/s) while the read path kept a real, repeatable ~12% gain — container
+  overhead (docker-proxy/NAT, cgroup accounting) dominates enough to swamp the smaller
+  effect; don't trust a single benchmark run on a shared dev host for this, especially the
+  read path (seen swing ±25% run to run under nominally identical conditions).
+  `node_modules` is **not** dropped from the shipped image despite bundling — `prisma`
+  (the CLI, for the README's documented `prisma migrate deploy` one-off workflow) lives in
+  `devDependencies` and needs to still be invokable from the *published* image after the
+  fact, which a discarded multi-stage builder stage can't provide (it's gone by the time
+  anyone pulls the image; DB migrations are inherently a runtime action against each
+  user's own `DATABASE_URL`, unknowable at CI build time anyway, so it can't be done at
+  build time and discarded either). So this bundled build doesn't shrink the image — the
+  win is startup time and (partially, noisily) request latency, not size.
+
 ## Known environment gotcha
 
 `bun install` can populate a stale/corrupted entry in Bun's *global* package cache

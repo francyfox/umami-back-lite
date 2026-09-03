@@ -33,6 +33,11 @@
     // "rootDirs": [],                                   /* Allow multiple folders to be treated as one when resolving modules. */
     // "typeRoots": [],                                  /* Specify multiple folders that act like './node_modules/@types'. */
     "types": ["bun-types"],                                      /* Specify type package names to be included without being referenced in a source file. */
+    // scripts/generate-route-manifest.ts emits literal `import("...route.ts")`
+    // specifiers (see that file for why they must be literal, not a
+    // runtime-computed path) — tsc otherwise refuses a statically-resolvable
+    // import ending in .ts. Always invoked with --noEmit, so this is safe.
+    "allowImportingTsExtensions": true,
     // "allowUmdGlobalAccess": true,                     /* Allow accessing UMD globals from modules. */
     // "moduleSuffixes": [],                             /* List of file name suffixes to search when resolving a module. */
     // "resolveJsonModule": true,                        /* Enable importing .json files. */
