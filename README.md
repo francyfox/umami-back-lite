@@ -62,8 +62,9 @@ That's it. Embed the tracker on any site exactly like official Umami:
 <script defer src="https://your-instance.example.com/script.js" data-website-id="..."></script>
 ```
 
-`/script.js` is the real upstream tracker build (extracted from Umami's own published image at
-vendor time, byte-identical), and the same `/api/*` routes are there for dashboards, the
+`/script.js` and `/recorder.js` (session replay / heatmap client, if you enable that on a
+website) are the real upstream builds — extracted from Umami's own published image at
+vendor time, byte-identical — and the same `/api/*` routes are there for dashboards, the
 Umami MCP integration, or anything else already talking to a real Umami backend.
 
 ### Environment variables

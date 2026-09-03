@@ -68,42 +68,55 @@ export async function mountCollectRoutes(app: AnyElysia) {
   return app;
 }
 
-const TRACKER_SCRIPT_PATH = new URL(
-  "../vendor/umami/public/script.js",
-  import.meta.url,
-).pathname;
+const PUBLIC_ROOT = new URL("../vendor/umami/public", import.meta.url).pathname;
 
-// script.js isn't in upstream's git tree — it's a rollup build output
-// (src/tracker/* -> public/script.js) they produce at their own build time.
-// scripts/vendor-umami.sh extracts the real built file from their published
-// Docker image instead of us vendoring their whole tracker build toolchain
-// for one file. Headers/caching match what their own server sends it with.
-export async function mountTrackerScript(app: AnyElysia) {
-  const script = await Bun.file(TRACKER_SCRIPT_PATH).text();
+// script.js (tracker) and recorder.js (session replay / heatmap client) both
+// aren't in upstream's git tree — they're rollup build outputs
+// (src/tracker/*, src/recorder/*) they produce at their own build time.
+// scripts/vendor-umami.sh extracts the real built files from their published
+// Docker image instead of us vendoring their whole build toolchain for two
+// files. Headers/caching match what their own server sends them with.
+async function mountStaticScript(
+  app: AnyElysia,
+  path: string,
+  file: string,
+  aliasEnvVar?: string,
+) {
+  const body = await Bun.file(`${PUBLIC_ROOT}/${file}`).text();
   const headers = {
     "Content-Type": "application/javascript; charset=UTF-8",
     "Cache-Control": "public, max-age=86400, must-revalidate",
     "Access-Control-Allow-Origin": "*",
   };
-  const handler = () => new Response(script, { headers });
+  const handler = () => new Response(body, { headers });
 
-  app.get("/script.js", handler);
+  app.get(path, handler);
 
-  // Ad-blocker-evasion aliases, matching upstream's own next.config.ts:
+  // Ad-blocker-evasion aliases, matching upstream's own next.config.ts, e.g.
   // TRACKER_SCRIPT_NAME="analytics.js,stats.js" serves the same script.js
   // content under those extra paths too.
-  const names = (process.env.TRACKER_SCRIPT_NAME ?? "")
-    .split(",")
-    .map((n) => n.trim())
-    .filter(Boolean);
+  const names = aliasEnvVar
+    ? (process.env[aliasEnvVar] ?? "")
+        .split(",")
+        .map((n) => n.trim())
+        .filter(Boolean)
+    : [];
 
   for (const name of names) {
     app.get(`/${name.replace(/^\/+/, "")}`, handler);
   }
 
   console.log(
-    `Mounted tracker script at /script.js${names.length ? ` (+ ${names.length} alias${names.length === 1 ? "" : "es"})` : ""}`,
+    `Mounted ${file} at ${path}${names.length ? ` (+ ${names.length} alias${names.length === 1 ? "" : "es"})` : ""}`,
   );
+}
 
+export async function mountTrackerScript(app: AnyElysia) {
+  await mountStaticScript(app, "/script.js", "script.js", "TRACKER_SCRIPT_NAME");
+  return app;
+}
+
+export async function mountRecorderScript(app: AnyElysia) {
+  await mountStaticScript(app, "/recorder.js", "recorder.js");
   return app;
 }

@@ -2,7 +2,7 @@ import { Elysia } from "elysia";
 import cors from "@elysiajs/cors";
 import { rateLimit } from "elysia-rate-limit";
 import logixlysia from "logixlysia";
-import { mountCollectRoutes, mountTrackerScript, mountUmamiRoutes } from "./mount";
+import { mountCollectRoutes, mountRecorderScript, mountTrackerScript, mountUmamiRoutes } from "./mount";
 
 export async function createApp() {
   const app = new Elysia()
@@ -39,6 +39,7 @@ export async function createApp() {
   await mountUmamiRoutes(app);
   await mountCollectRoutes(app);
   await mountTrackerScript(app);
+  await mountRecorderScript(app);
 
   return app;
 }

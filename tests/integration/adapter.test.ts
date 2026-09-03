@@ -114,6 +114,16 @@ describe("mount.ts: tracker script", () => {
     const res = await request("/analytics.js");
     expect(res.status).toBe(404);
   });
+
+  it("serves the real vendored recorder.js (session replay / heatmap client)", async () => {
+    const res = await request("/recorder.js");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("application/javascript");
+    const body = await res.text();
+    // The real bundle is ~190KB (rrweb + umami's own recorder glue); a
+    // trivial/empty response here means the vendored file went missing.
+    expect(body.length).toBeGreaterThan(50_000);
+  });
 });
 
 describe("app.ts: cross-cutting plugins are actually wired", () => {
