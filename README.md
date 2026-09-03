@@ -56,9 +56,15 @@ docker run --rm \
   bun run --bun prisma migrate deploy
 ```
 
-That's it — `script.js` points at this instance exactly like it would at official Umami,
-and the same `/api/*` routes are there for dashboards, the Umami MCP integration, or
-anything else already talking to a real Umami backend.
+That's it. Embed the tracker on any site exactly like official Umami:
+
+```html
+<script defer src="https://your-instance.example.com/script.js" data-website-id="..."></script>
+```
+
+`/script.js` is the real upstream tracker build (extracted from Umami's own published image at
+vendor time, byte-identical), and the same `/api/*` routes are there for dashboards, the
+Umami MCP integration, or anything else already talking to a real Umami backend.
 
 ### Environment variables
 
@@ -69,6 +75,7 @@ anything else already talking to a real Umami backend.
 | `RATE_LIMIT_MAX` | no | `300` | Requests per window per IP |
 | `RATE_LIMIT_WINDOW_MS` | no | `10000` | Rate-limit window, in ms |
 | `GEOLITE_DB_PATH` | no | pre-set in the image | Points at a geo database for IP -> country lookup — see [Geo lookups](#geo-lookups) |
+| `TRACKER_SCRIPT_NAME` | no | — | Comma-separated alternate paths that also serve `/script.js` (ad-blocker evasion), e.g. `analytics.js,stats.js` |
 
 Everything else official Umami reads (`REDIS_URL`, `CLICKHOUSE_URL`, `KAFKA_*`,
 `DATABASE_REPLICA_URL`, `SALT_ROTATION`, `DISABLE_BOT_CHECK`, `CLOUD_MODE`, `LOG_QUERY`,

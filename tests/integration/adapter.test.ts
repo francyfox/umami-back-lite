@@ -98,6 +98,24 @@ describe("mount.ts: dynamic path params", () => {
   });
 });
 
+describe("mount.ts: tracker script", () => {
+  it("serves the real vendored script.js with matching content-type", async () => {
+    const res = await request("/script.js");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("application/javascript");
+    const body = await res.text();
+    expect(body.length).toBeGreaterThan(1000);
+    expect(body).toContain("currentScript");
+  });
+
+  it("returns 404 for an alias path when TRACKER_SCRIPT_NAME isn't set", async () => {
+    // Not set in this test run's env — mountTrackerScript should mount no
+    // extra aliases in that case.
+    const res = await request("/analytics.js");
+    expect(res.status).toBe(404);
+  });
+});
+
 describe("app.ts: cross-cutting plugins are actually wired", () => {
   it("applies CORS headers", async () => {
     const res = await request("/api/heartbeat");

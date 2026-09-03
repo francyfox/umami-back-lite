@@ -49,6 +49,7 @@ services:
       # Raise for a raw-capacity benchmark run: RATE_LIMIT_MAX=1000000 docker
       # compose up -d app — no rebuild needed, restore with a plain `up -d app`.
       RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-300}
+      TRACKER_SCRIPT_NAME: ${TRACKER_SCRIPT_NAME:-}
     ports:
       - "3000:3000"
 

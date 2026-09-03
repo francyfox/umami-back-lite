@@ -46,4 +46,19 @@ done
 
 echo "$VERSION" > "$DEST/UMAMI_VERSION"
 
+# The tracker (script.js) isn't in the git tree at all — it's a rollup build
+# output (src/tracker/* -> public/script.js) upstream produces at their own
+# build time, not something `cp` from the tarball can get us. Pulling it out
+# of their published Docker image reuses their real build output directly,
+# instead of vendoring their whole tracker build toolchain for one file.
+# Caveat: `postgresql-latest` tracks their latest release, not necessarily
+# this exact $VERSION tag — acceptable since the tracker's public behavior
+# has been stable across releases for years; revisit if that ever bites.
+echo "Extracting script.js from ghcr.io/umami-software/umami:postgresql-latest"
+docker pull -q ghcr.io/umami-software/umami:postgresql-latest >/dev/null
+CID="$(docker create ghcr.io/umami-software/umami:postgresql-latest)"
+mkdir -p "$DEST/public"
+docker cp "$CID:/app/public/script.js" "$DEST/public/script.js"
+docker rm "$CID" >/dev/null
+
 echo "Vendored ${VERSION} into ${DEST}"
