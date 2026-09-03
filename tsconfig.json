@@ -27,7 +27,7 @@
     /* Modules */
     "module": "ES2022",                                /* Specify what module code is generated. */
     // "rootDir": "./",                                  /* Specify the root folder within your source files. */
-    "moduleResolution": "node",                       /* Specify how TypeScript looks up a file from a given module specifier. */
+    "moduleResolution": "bundler",                    /* "node"'s node10 alias was removed upstream (TS 7); "bundler" matches umami's own tsconfig and works fine with Bun's runtime path resolution. */
     // "baseUrl": "./",                                  /* Specify the base directory to resolve non-relative module names. */
     "paths": { "@/*": ["./vendor/umami/src/*"] },        /* Specify a set of entries that re-map imports to additional lookup locations. */
     // "rootDirs": [],                                   /* Allow multiple folders to be treated as one when resolving modules. */
@@ -111,6 +111,12 @@
     // out of scope per the fork plan) or are otherwise unreachable from app/api/**.
     "vendor/umami/src/lib/boards.test.ts",
     "vendor/umami/src/lib/colors.ts",
-    "vendor/umami/src/lib/colors.test.ts"
+    "vendor/umami/src/lib/colors.test.ts",
+    // `vi.mocked(prisma, true)` deep-mocks the whole (large, recursive)
+    // Prisma Client type; TS 7's generic-recursion limits choke on it
+    // ("Type instantiation is excessively deep"). Doesn't affect running the
+    // test itself (vitest transpiles, doesn't type-check) — a tsc/vitest
+    // interaction on this one file, not a real defect.
+    "vendor/umami/src/app/api/admin/users/[userId]/2fa/route.test.ts"
   ]
 }
