@@ -47,14 +47,15 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Typecheck
-        run: bunx tsc --noEmit
-
-      # Needed before any test that touches vendored lib/queries code, even
-      # the mocked-DB unit tests below — several files import the generated
-      # client directly regardless of whether a given test mocks it.
+      # Needed before typecheck and before any test that touches vendored
+      # lib/queries code, even the mocked-DB unit tests below — many files
+      # import the generated client directly (types included) regardless of
+      # whether a given test mocks it at the module level.
       - name: Generate Prisma client
         run: bun run --bun --env-file=.env.build prisma generate
+
+      - name: Typecheck
+        run: bunx tsc --noEmit
 
       # Vendored *.test.ts files are vitest tests (upstream's own `vitest run`);
       # `bun test`'s vitest-compat shim doesn't fully support `vi.mock` with async
