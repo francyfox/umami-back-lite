@@ -2,6 +2,7 @@ import { Elysia } from "elysia";
 import cors from "@elysiajs/cors";
 import { rateLimit } from "elysia-rate-limit";
 import logixlysia from "logixlysia";
+import { getIpAddress } from "@/lib/ip";
 import {
   HEARTBEAT_PATH,
   mountCollectRoutes,
@@ -73,6 +74,22 @@ export async function createApp(options: CreateAppOptions = {}) {
       rateLimit({
         max: process.env.RATE_LIMIT_MAX ? Number(process.env.RATE_LIMIT_MAX) : 300,
         duration: process.env.RATE_LIMIT_WINDOW_MS ? Number(process.env.RATE_LIMIT_WINDOW_MS) : 10_000,
+        // The plugin's own default generator keys on server.requestIP(request),
+        // which only sees the real visitor when Bun terminates the TCP
+        // connection directly. Behind a reverse proxy (Caddy, nginx, ...) that
+        // fails — observed in production as a constant stream of "[elysia-rate-limit]
+        // failed to determine client address" — and the plugin's own fallback
+        // for that failure is a fixed "" key, silently collapsing every
+        // proxied visitor into one shared bucket instead of a per-IP one.
+        // getIpAddress (vendor/umami/src/lib/ip.ts) is the same header chain
+        // detect.ts already trusts for geolocation (Cloudflare/Fastly/DO/
+        // x-real-ip/x-forwarded-for/forwarded, in priority order, with
+        // CLIENT_IP_HEADER as an escape hatch) — reusing it here instead of a
+        // second bespoke parser keeps proxy trust configured in exactly one
+        // place. requestIP() stays as the fallback for direct connections
+        // (local dev, no proxy in front).
+        generator: (request, server) =>
+          getIpAddress(request.headers) ?? server?.requestIP(request)?.address ?? "",
       }),
     );
 
