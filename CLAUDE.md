@@ -36,6 +36,30 @@ in one process, ~220MB idle). This project splits that apart:
 - **Routing pattern**: don't rewrite Umami's route logic. Each vendored `route.ts` exposes
   Web-standard `Request`/`Response` handlers (e.g. `POST`); Elysia routes should just call
   through, e.g. `app.post('/api/auth/login', ({ request }) => loginRoute.POST(request))`.
+  `mountRouteEntries` (`src/mount.ts`) sets `set.status` from the handler's real
+  `Response.status` after calling through — without it, `set.status` stays `undefined`
+  forever (vendored handlers never touch Elysia's `set`), and every request logger that
+  reads it — logixlysia's `onAfterHandle` included — defaults to `200` regardless of the
+  real status. Found by noticing every access-log line said 200 even for a verified-400
+  `curl` response; don't drop this when touching the mounting loop.
+- **`/api/heartbeat` is mounted on a separate Elysia instance, not skipped or special-cased
+  inline** (`src/app.ts`'s `createApp`): the outer `app` (what actually gets `.listen()`ed)
+  carries only `/api/heartbeat`, mounted directly and before anything else; `main` carries
+  every other route plus `.use(logixlysia()).use(cors()).use(rateLimit())`, and gets merged
+  in last via `app.use(main)`. Same port, same process — this is a code-only split. Why:
+  once a plugin is `.use()`d onto an instance, a route already sharing that instance can't
+  opt out of its hooks (tried an `onRequest` short-circuit returning an early `Response` —
+  it does skip the rest of the lifecycle including `onAfterHandle`, confirmed empirically,
+  but that also skips whichever earlier `.use()`d plugins run in `onRequest`/`onBeforeHandle`
+  too indiscriminately — lost CORS *and* rate-limit, not just logging). A genuinely separate
+  instance, merged in afterward, is the only way to keep `main`'s plugins off a route that
+  isn't part of `main`. Elysia hook scope matters here too: `cors()` uses `'global'` scope
+  and reaches `app`'s heartbeat route anyway (verified, and harmless to keep); `rateLimit()`
+  and `logixlysia` use `'scoped'` and don't reach past `main`, which is exactly what's
+  wanted. Verified Docker/Podman's own `HEALTHCHECK` (a plain `curl`, same host) is the only
+  real caller upstream (`gh search code "heartbeat" --repo umami-software/umami`) — never
+  the browser dashboard — before deciding CORS/rate-limit exemption was actually safe, not
+  just convenient.
 - **What gets vendored**: `lib/` (auth.ts, jwt.ts, crypto.ts, password.ts, db.ts, prisma.ts,
   request.ts, response.ts, schema.ts, filters.ts, + their `*.test.ts`), `queries/`
   (prisma/ and sql/ layers), `prisma/` (schema + migrations as-is), and only the needed

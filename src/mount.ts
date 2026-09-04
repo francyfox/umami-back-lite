@@ -70,9 +70,24 @@ export function mountRouteEntries(app: AnyElysia, entries: RouteEntry[]): number
     for (const method of entry.methods) {
       app[method.toLowerCase()](
         entry.path,
-        async ({ request, params }: { request: Request; params: Record<string, string> }) => {
+        async ({
+          request,
+          params,
+          set,
+        }: {
+          request: Request;
+          params: Record<string, string>;
+          set: { status?: number | string };
+        }) => {
           const mod = await entry.load();
-          return mod[method](request, { params: Promise.resolve(params) });
+          const response = await mod[method](request, { params: Promise.resolve(params) });
+          // Vendored handlers return a plain Response and never touch Elysia's
+          // `set` — without this, `set.status` stays undefined and every
+          // request logger that reads it (logixlysia's onAfterHandle included)
+          // defaults to 200 regardless of the real status, silently turning
+          // every 400/401/500 in the access log into a fake 200.
+          set.status = response.status;
+          return response;
         },
       );
       count++;
@@ -81,6 +96,16 @@ export function mountRouteEntries(app: AnyElysia, entries: RouteEntry[]): number
 
   return count;
 }
+
+// Docker/Podman's own HEALTHCHECK is the only real caller of this (verified
+// against upstream umami's docker-compose.yml/podman-compose.yml — a plain
+// `curl` from inside the container, never the browser dashboard), polled
+// often enough that mounting it through the same pipeline as everything else
+// made it the single largest source of access-log noise, and its every
+// entry logged a fake 200 regardless of the real status until the set.status
+// fix above — see app.ts for why it's mounted on a separate, unlogged,
+// unrated instance instead.
+export const HEARTBEAT_PATH = "/api/heartbeat";
 
 // The actual `import()` only happens inside the handler, on the first real
 // request to that specific route, and is cached after that.
@@ -93,7 +118,12 @@ export function mountRouteEntries(app: AnyElysia, entries: RouteEntry[]): number
 // (2FA, admin, links, pixels, revenue, segments, replays, telemetry, ...)
 // whether or not a given deployment ever uses it. This way, a deployment
 // that only ever hits send/stats/websites/reports never pays for the rest.
-export async function mountUmamiRoutes(app: AnyElysia) {
+//
+// `unloggedApp` gets just HEARTBEAT_PATH — see app.ts's createApp for why
+// mounting it on a separate instance without logixlysia/rateLimit actually
+// excludes it from theirs (a same-instance route can't opt out of an
+// already-`.use()`d plugin's hooks; a sibling instance can).
+export async function mountUmamiRoutes(app: AnyElysia, unloggedApp: AnyElysia) {
   const infos = await scanApiRoutes();
 
   const entries: RouteEntry[] = infos.map((info) => {
@@ -102,7 +132,11 @@ export async function mountUmamiRoutes(app: AnyElysia) {
     return { path: info.path, methods: info.methods, load: () => (modPromise ??= import(filePath)) };
   });
 
-  const count = mountRouteEntries(app, entries);
+  const heartbeatEntries = entries.filter((e) => e.path === HEARTBEAT_PATH);
+  const restEntries = entries.filter((e) => e.path !== HEARTBEAT_PATH);
+
+  mountRouteEntries(unloggedApp, heartbeatEntries);
+  const count = mountRouteEntries(app, restEntries);
 
   console.log(`Mounted ${count} umami route handlers from ${API_ROOT} (lazy — imported on first hit)`);
 

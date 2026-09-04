@@ -133,7 +133,11 @@ describe("app.ts: cross-cutting plugins are actually wired", () => {
   });
 
   it("applies rate-limit headers", async () => {
-    const res = await request("/api/heartbeat");
+    // Not /api/heartbeat: it's mounted on its own unrated instance now (see
+    // app.ts's createApp) — Docker/Podman's HEALTHCHECK is its only real
+    // caller (verified against upstream's own compose files), so it never
+    // needed rate-limiting in the first place.
+    const res = await request("/api/websites");
     expect(res.headers.get("ratelimit-limit")).toBeTruthy();
   });
 });

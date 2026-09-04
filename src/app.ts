@@ -3,6 +3,7 @@ import cors from "@elysiajs/cors";
 import { rateLimit } from "elysia-rate-limit";
 import logixlysia from "logixlysia";
 import {
+  HEARTBEAT_PATH,
   mountCollectRoutes,
   mountRecorderScript,
   mountRouteEntries,
@@ -27,7 +28,17 @@ export async function createApp(options: CreateAppOptions = {}) {
   // apparently consumes the body stream itself before our handler runs,
   // so downstream `request.json()` sees nothing. Not worth chasing further
   // for ~7MB — stick with the (default) AOT-compiled dispatcher.
-  const app = new Elysia()
+  // `app` (outer, returned) stays minimal — just /api/heartbeat, mounted
+  // directly on it below — and merges `main` (everything else) in last.
+  // logixlysia/rateLimit are `main`'s own plugins; a route already sharing
+  // `main`'s instance can't opt out of a `.use()`d plugin's hooks once
+  // registered, so heartbeat has to live on a genuinely separate instance
+  // instead (verified: cors() reaches app's routes too regardless — it uses
+  // Elysia's 'global' hook scope — but rateLimit/logixlysia, both 'scoped',
+  // don't reach past `main` unless a route is actually inside it).
+  const app = new Elysia();
+
+  const main = new Elysia()
     .use(
       logixlysia({
         config: {
@@ -42,6 +53,13 @@ export async function createApp(options: CreateAppOptions = {}) {
             translateTime: "yyyy-mm-dd HH:MM:ss.SSS",
           },
           ip: true,
+          // The plugin's own default format has no {ip} token, so `ip: true`
+          // above silently did nothing — the client address never appeared
+          // anywhere in the log line. logQueryParams surfaces e.g. which
+          // website/date-range a /api/websites/:id/stats call was for,
+          // otherwise indistinguishable requests to the same path.
+          logQueryParams: true,
+          customLogFormat: "{now} {service}{icon} {method} {pathname}{query} {status} {duration} {ip} {message}{speed}",
         },
       }),
     )
@@ -59,21 +77,26 @@ export async function createApp(options: CreateAppOptions = {}) {
     );
 
   if (options.apiRoutes) {
-    const count = mountRouteEntries(app, options.apiRoutes);
+    const heartbeatRoutes = options.apiRoutes.filter((r) => r.path === HEARTBEAT_PATH);
+    const restRoutes = options.apiRoutes.filter((r) => r.path !== HEARTBEAT_PATH);
+    mountRouteEntries(app, heartbeatRoutes);
+    const count = mountRouteEntries(main, restRoutes);
     console.log(`Mounted ${count} umami route handlers from route-manifest.generated.ts`);
   } else {
-    await mountUmamiRoutes(app);
+    await mountUmamiRoutes(main, app);
   }
 
   if (options.collectRoutes) {
-    mountRouteEntries(app, options.collectRoutes);
+    mountRouteEntries(main, options.collectRoutes);
     console.log("Mounted 2 umami collect route handlers from route-manifest.generated.ts");
   } else {
-    await mountCollectRoutes(app);
+    await mountCollectRoutes(main);
   }
 
-  await mountTrackerScript(app);
-  await mountRecorderScript(app);
+  await mountTrackerScript(main);
+  await mountRecorderScript(main);
+
+  app.use(main);
 
   return app;
 }
