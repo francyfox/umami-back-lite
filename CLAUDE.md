@@ -17,25 +17,19 @@ in one process, ~220MB idle). This project splits that apart:
   directly. There is no HTTP link between the dashboard and this backend — the database is
   the only shared point of contact.
 
-The full rationale, source-level analysis of upstream Umami (which route handlers are
-already Next-free), the Prisma driver-adapter plan, and the milestone breakdown (M0–M4)
-live in `docs/umami-elysia-fork-plan.md` — read it before doing any nontrivial work here,
-especially before vendoring a new route group or touching the Prisma client setup.
-
-**Current status**: past M0/M1. The full `app/api/**` tree is vendored and mounted (no
-whitelist — see the git history for why), `src/app.ts`/`src/mount.ts` are real, CI builds
-and publishes to GHCR, and there's a benchmark + integration test suite. The rest of this
-file (below) predates that work and is stale in places — re-read the actual code
-(`src/`, `scripts/vendor-umami.sh`, `tests/integration/`) rather than trusting every
-detail here.
 
 ## Commands
 
 - Install deps: `bun install`
 - Run dev server (watch mode): `bun run dev` (equivalent to `bun run --watch src/index.ts`)
 - Run directly: `bun run src/index.ts`
-- No test runner or lint script is configured yet — `bun run test` is the unconfigured npm
-  default placeholder (exits 1). Set up real tests/lint before relying on either.
+- Unit tests (vendored `lib`/`queries`/permissions, real vitest — see CI comment in
+  `.github/workflows/ci.yml` for why not `bun test`'s vitest-compat shim): `bun run test`
+- Integration tests (real HTTP request through our Elysia adapter into a vendored route
+  handler, against a real Postgres): `bun run test:integration`
+- No lint script is configured yet.
+- Bundled build (see the Bundled build section below): `bun run build`, then
+  `bun run start:bundled`
 
 ## Architecture notes for future work (per the fork plan)
 
@@ -120,13 +114,43 @@ detail here.
   effect; don't trust a single benchmark run on a shared dev host for this, especially the
   read path (seen swing ±25% run to run under nominally identical conditions).
   `node_modules` is **not** dropped from the shipped image despite bundling — `prisma`
-  (the CLI, for the README's documented `prisma migrate deploy` one-off workflow) lives in
-  `devDependencies` and needs to still be invokable from the *published* image after the
-  fact, which a discarded multi-stage builder stage can't provide (it's gone by the time
-  anyone pulls the image; DB migrations are inherently a runtime action against each
-  user's own `DATABASE_URL`, unknowable at CI build time anyway, so it can't be done at
-  build time and discarded either). So this bundled build doesn't shrink the image — the
-  win is startup time and (partially, noisily) request latency, not size.
+  (the CLI, for the README's documented `prisma migrate deploy` one-off workflow) needs to
+  still be invokable from the *published* image after the fact (DB migrations are
+  inherently a runtime action against each user's own `DATABASE_URL`, unknowable at CI
+  build time anyway, so it can't be done at build time and discarded). This does *not*
+  mean the build has to stay single-stage, though — see the Dockerfile section below for
+  the multi-stage version that keeps `prisma` while still dropping the build toolchain.
+
+- **Dockerfile** is multi-stage (`builder` runs `prisma generate` + the geo-db download +
+  `bun run build`; `runtime` is what actually ships). Both stages pin `oven/bun:1.4-alpine`
+  rather than the floating `oven/bun:1`/`oven/bun:1-alpine` tags — verified locally that
+  `oven/bun:1-alpine` lagged at bun 1.3.14 while `oven/bun:1` (debian) and this repo's own
+  `bun.lock` were on 1.4.0, and 1.3.14 can't parse `bun.lock`'s `lockfileVersion: 2`
+  (`--frozen-lockfile` hard-fails with "Unknown lockfile version") — bump this pin
+  alongside `bun-types` in `package.json` when upgrading bun, don't drop back to a floating
+  tag. `prisma` lives in `package.json`'s `"dependencies"` (not `"devDependencies"`)
+  specifically so the `runtime` stage's `bun install --frozen-lockfile --production` still
+  installs the CLI; `tsdown`/`typescript`/`vitest` and their transitive deps do not get
+  reinstalled there. `RUN --mount=type=cache,target=/root/.bun/install/cache` on both
+  install steps keeps bun's global package cache out of the image layers entirely (a
+  `rm -rf` *after* the same `bun install` in one combined `RUN` also works and was tested —
+  bun hardlinks cache entries into `node_modules`, so a same-layer cleanup only saved ~4MB,
+  not the ~400MB a naive `du` on the cache dir suggests; deleting it in a *later* `RUN`
+  saves nothing at all, since Docker layers are additive and the earlier layer's bytes are
+  already committed — the cache mount is the actually-correct fix, not a micro-optimization).
+  `vendor/umami/public/{script.js,recorder.js}` are copied explicitly into `runtime` — they
+  are read straight off disk at request time by `mountStaticScript` (`src/mount.ts`) via a
+  `Bun.file()` path relative to the running module, *not* bundled by tsdown the way
+  `route.ts` handlers are (verified by omitting them: cold start throws `ENOENT` opening
+  `script.js`, not caught by anything upstream). `vendor/umami/src/app/api` (the route
+  source tree) is *not* copied into `runtime` — the bundled build never reads it at
+  runtime, only `mount.ts`'s `scanApiRoutes()` fallback (the dev/`src/index.ts` path) does.
+  Measured end-to-end (`docker build`/`docker history`, this host): previous single-stage
+  debian image was 690MB, and ~480MB of that was bun's *own install cache* at `/root/.bun`
+  baked into the image — a near-duplicate of `node_modules` that no `RUN` step ever
+  cleaned and there was no second stage to leave it behind in. This Dockerfile: 511MB.
+  Verified working end-to-end against a real Postgres: `prisma migrate deploy` from inside
+  the shipped `runtime` image, and the app itself serving `/script.js` and `/api/heartbeat`.
 
 ## Known environment gotcha
 
