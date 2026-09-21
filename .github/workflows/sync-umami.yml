@@ -51,13 +51,18 @@ jobs:
           git checkout -b "$branch"
           git add -A vendor/umami
           git commit -m "chore: sync umami ${VERSION}"
-          git push origin "$branch"
+          # Bot-owned branch, rebuilt from master every run: a leftover branch from a
+          # run that pushed but failed to open the PR must not block the next run.
+          git push --force origin "$branch"
 
-          pr_url="$(gh pr create \
-            --title "chore: sync umami ${VERSION}" \
-            --body "Automated vendor sync to umami-software/umami@${VERSION}. Merges automatically once CI is green." \
-            --head "$branch" \
-            --base master)"
+          pr_url="$(gh pr list --head "$branch" --state open --json url --jq '.[0].url')"
+          if [ -z "$pr_url" ]; then
+            pr_url="$(gh pr create \
+              --title "chore: sync umami ${VERSION}" \
+              --body "Automated vendor sync to umami-software/umami@${VERSION}. Merges automatically once CI is green." \
+              --head "$branch" \
+              --base master)"
+          fi
 
           # Requires auto-merge to be enabled on the repo; falls back to a plain
           # open PR (manual merge) if that setting is off.
