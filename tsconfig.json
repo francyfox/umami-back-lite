@@ -122,6 +122,18 @@
     // ("Type instantiation is excessively deep"). Doesn't affect running the
     // test itself (vitest transpiles, doesn't type-check) — a tsc/vitest
     // interaction on this one file, not a real defect.
-    "vendor/umami/src/app/api/admin/users/[userId]/2fa/route.test.ts"
+    "vendor/umami/src/app/api/admin/users/[userId]/2fa/route.test.ts",
+    // Upstream's OpenAPI doc layer (v3.4.0+): every `contract.ts` /
+    // `contract.generated.ts` next to a route only feeds upstream's own spec
+    // generator, and imports `@/openapi/*` (not vendored) and `zod-openapi`
+    // (not a dep here). Nothing under app/api/**/route.ts imports them, so they
+    // never reach the bundle or the runtime — only tsc would trip on them.
+    "vendor/umami/src/app/api/**/contract.ts",
+    "vendor/umami/src/app/api/**/contract.generated.ts",
+    // Upstream's MCP server glue. `auth.ts` has a type-only import of
+    // `@umami/mcp`, a workspace package in upstream's monorepo that isn't
+    // installed here. Its tests run fine under vitest (the import is erased);
+    // only the type resolution is missing.
+    "vendor/umami/src/lib/mcp"
   ]
 }
