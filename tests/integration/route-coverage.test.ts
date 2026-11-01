@@ -19,7 +19,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { Glob } from "bun";
-import { API_ROOT, METHODS, toElysiaPath } from "../../src/mount";
+import { API_ROOT, HEARTBEAT_PATH, METHODS, toElysiaPath } from "../../src/mount";
 import { createApp } from "../../src/app";
 
 const METHOD_EXPORT_RE = /^export\s+async\s+function\s+(GET|POST|PUT|PATCH|DELETE)\s*\(/gm;
@@ -49,6 +49,14 @@ describe("mount.ts: every vendored route.ts method is actually registered", () =
     // Sanity check on the check itself — if this is small, the glob/regex
     // above broke and the rest of the test would pass vacuously.
     expect(expected.size).toBeGreaterThan(100);
+
+    // Heartbeat is deliberately not on the returned app's own route table: it
+    // lives on a separate plugin-free instance reached through an outer
+    // `.wrap()` (see app.ts's createApp), so `app.routes` never lists it.
+    // Still assert it was discovered upstream (guards against a rename), and
+    // that it actually answers is covered in adapter.test.ts.
+    expect(expected.has(`GET ${HEARTBEAT_PATH}`)).toBe(true);
+    expected.delete(`GET ${HEARTBEAT_PATH}`);
 
     const app = await createApp();
     const actual = new Set(

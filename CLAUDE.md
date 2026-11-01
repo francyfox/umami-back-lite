@@ -42,24 +42,40 @@ in one process, ~220MB idle). This project splits that apart:
   reads it — logixlysia's `onAfterHandle` included — defaults to `200` regardless of the
   real status. Found by noticing every access-log line said 200 even for a verified-400
   `curl` response; don't drop this when touching the mounting loop.
-- **`/api/heartbeat` is mounted on a separate Elysia instance, not skipped or special-cased
-  inline** (`src/app.ts`'s `createApp`): the outer `app` (what actually gets `.listen()`ed)
-  carries only `/api/heartbeat`, mounted directly and before anything else; `main` carries
-  every other route plus `.use(logixlysia()).use(cors()).use(rateLimit())`, and gets merged
-  in last via `app.use(main)`. Same port, same process — this is a code-only split. Why:
-  once a plugin is `.use()`d onto an instance, a route already sharing that instance can't
-  opt out of its hooks (tried an `onRequest` short-circuit returning an early `Response` —
-  it does skip the rest of the lifecycle including `onAfterHandle`, confirmed empirically,
-  but that also skips whichever earlier `.use()`d plugins run in `onRequest`/`onBeforeHandle`
-  too indiscriminately — lost CORS *and* rate-limit, not just logging). A genuinely separate
-  instance, merged in afterward, is the only way to keep `main`'s plugins off a route that
-  isn't part of `main`. Elysia hook scope matters here too: `cors()` uses `'global'` scope
-  and reaches `app`'s heartbeat route anyway (verified, and harmless to keep); `rateLimit()`
-  and `logixlysia` use `'scoped'` and don't reach past `main`, which is exactly what's
-  wanted. Verified Docker/Podman's own `HEALTHCHECK` (a plain `curl`, same host) is the only
-  real caller upstream (`gh search code "heartbeat" --repo umami-software/umami`) — never
-  the browser dashboard — before deciding CORS/rate-limit exemption was actually safe, not
-  just convenient.
+- **Elysia 2 (`2.0.0-rc.1`)** — migrated from 1.4.29 with the official codemod
+  (`bunx @elysia/codemod@latest`; it refuses to run once `elysia` is already 2.x, and wants
+  an interactive "continue?" confirmation, so run it from a real/pty terminal against an
+  installed 1.4 tree). It only touched `package.json` and renamed `@elysiajs/cors` →
+  `@elysia/cors`; it does **not** bump `elysia-rate-limit` (needs `5.x`) or `logixlysia`
+  (needs `7.x`, still a `next` pre-release) — those peer ranges are `>= 2.0.0-*` and have
+  to be bumped by hand. Every Elysia-related dependency is pinned **exact** (no `rc`/`next`
+  dist-tags) — Elysia 2 also declares `typebox >= 1.3.0` and `exact-mirror >= 1.2.6` as
+  *peer* deps, and a stale `exact-mirror@0.2.7` left in `bun.lock` from the 1.4 era
+  silently satisfied nothing; both are now explicit direct dependencies. Behaviour changes
+  worth knowing: unmatched routes return RFC 9457 `application/problem+json`
+  (`{"type":"not-found",...}`) instead of the plain `NOT_FOUND` text 1.4 sent. Measured
+  against 1.4.29 on this host (`ab`, 3 runs each): idle RSS ~51-54MB vs ~57MB, `/api/send`
+  and `/stats` against a real Postgres equal or better; the one real gap left is the
+  framework-level *error* path (404 etc., logixlysia 7 writes a context tree per error),
+  ~30% fewer req/s — real tracking/API traffic doesn't take it.
+- **`/api/heartbeat` is served by a separate, plugin-free Elysia instance reached through
+  an outer `.wrap()`** (`src/app.ts`'s `createApp`): `heartbeatApp` carries only
+  `/api/heartbeat`; the returned `app` has a `.wrap()` that answers that exact path
+  straight from `heartbeatApp.fetch(...)` and hands every other request to the normal
+  pipeline; `main` carries every other route plus
+  `.use(logixlysia()).use(cors()).use(rateLimit())` and is merged in last via
+  `app.use(main)`. Same port, same process. **Order matters**: the wrap must be
+  registered on `app` *before* `app.use(main)` — logixlysia 7 logs through its own global
+  `.wrap()` (it wraps the whole `fetch`), and a wrap registered earlier runs *outside* a
+  later one, a wrap registered after `.use(main)` doesn't (verified empirically). A plain
+  sibling instance — what worked on 1.4, where logixlysia/rate-limit were `'scoped'` —
+  is not enough on Elysia 2: heartbeat then lands in the access log (20k log lines per 20k
+  requests, ~17% throughput loss, measured). Consequence: heartbeat gets no CORS and no
+  rate-limit headers either; fine, since Docker/Podman's own `HEALTHCHECK` (a plain
+  `curl`, same host) is the only real caller upstream (`gh search code "heartbeat" --repo
+  umami-software/umami`), never the browser dashboard. `app.routes` therefore does not
+  list heartbeat — `tests/integration/route-coverage.test.ts` accounts for that
+  explicitly.
 - **What gets vendored**: `lib/` (auth.ts, jwt.ts, crypto.ts, password.ts, db.ts, prisma.ts,
   request.ts, response.ts, schema.ts, filters.ts, + their `*.test.ts`), `queries/`
   (prisma/ and sql/ layers), `prisma/` (schema + migrations as-is), and only the needed
@@ -188,7 +204,14 @@ before assuming it's a real upstream bug — if they differ, delete the specific
 `~/.bun/install/cache/<pkg>@<version>@@@1` entry (and `node_modules`/`bun.lock`) and
 reinstall.
 
-Separately, `elysia@1.4.30` (the `latest` dist-tag at time of writing) is a genuinely
-broken release upstream — it self-imports via bare specifiers not covered by its own
-`exports` map. `package.json` pins `elysia` to `1.4.29` for this reason; don't casually
-bump it back to `"latest"` without checking the installed `dist/index.mjs` imports first.
+Separately, the Elysia 1.x `latest` dist-tag (`1.4.30`) is a genuinely broken release
+upstream — it self-imports via bare specifiers not covered by its own `exports` map. That
+was why `package.json` used to pin `elysia` to `1.4.29`; the project is now on the 2.x
+line (see the Elysia 2 note above), pinned exact. Don't switch to a floating dist-tag
+(`latest`/`rc`/`next`) for `elysia`, `@elysia/cors`, `elysia-rate-limit` or `logixlysia`
+without checking the installed `dist/` imports and peer ranges first.
+
+The upstream sync workflow (`.github/workflows/sync-umami.yml`) wipes and re-vendors
+`vendor/umami/` from scratch (`rm -rf` then copy) and auto-merges when CI is green, so
+Elysia-specific changes must live in `src/`, `tests/` and `package.json` — never in
+`vendor/` — or the next sync PR silently drops them.
