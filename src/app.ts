@@ -1,5 +1,5 @@
 import { Elysia } from "elysia";
-import cors from "@elysiajs/cors";
+import cors from "@elysia/cors";
 import { rateLimit } from "elysia-rate-limit";
 import logixlysia from "logixlysia";
 import { getIpAddress } from "@/lib/ip";
@@ -29,15 +29,25 @@ export async function createApp(options: CreateAppOptions = {}) {
   // apparently consumes the body stream itself before our handler runs,
   // so downstream `request.json()` sees nothing. Not worth chasing further
   // for ~7MB — stick with the (default) AOT-compiled dispatcher.
-  // `app` (outer, returned) stays minimal — just /api/heartbeat, mounted
-  // directly on it below — and merges `main` (everything else) in last.
-  // logixlysia/rateLimit are `main`'s own plugins; a route already sharing
-  // `main`'s instance can't opt out of a `.use()`d plugin's hooks once
-  // registered, so heartbeat has to live on a genuinely separate instance
-  // instead (verified: cors() reaches app's routes too regardless — it uses
-  // Elysia's 'global' hook scope — but rateLimit/logixlysia, both 'scoped',
-  // don't reach past `main` unless a route is actually inside it).
-  const app = new Elysia();
+  // Elysia 2: logixlysia 7 logs through a global `.wrap()` (it wraps the
+  // whole `fetch`), which — unlike 1.x's 'scoped' hooks — reaches every route
+  // of the final app, so merely keeping /api/heartbeat on a sibling instance
+  // no longer keeps it out of the access log (measured: 20k heartbeat lines
+  // per 20k requests on 2.0.0-rc.1, 0 on 1.4). rateLimit still does not
+  // reach it, cors() does (harmless, same as before).
+  // Fix: heartbeat lives on its own plugin-free instance, and the outer `app`
+  // gets a `.wrap()` of its own that answers it directly. It MUST be
+  // registered here, before `app.use(main)` merges logixlysia's wrap —
+  // verified empirically that a wrap registered earlier runs outside a later
+  // one, and one registered after `.use(main)` does not.
+  const heartbeatApp = new Elysia();
+  const app = new Elysia().wrap(
+    (fetch: any) =>
+      (request: Request, ...rest: any[]) =>
+        new URL(request.url).pathname === HEARTBEAT_PATH
+          ? heartbeatApp.fetch(request)
+          : fetch(request, ...rest),
+  );
 
   const main = new Elysia()
     .use(
@@ -96,11 +106,11 @@ export async function createApp(options: CreateAppOptions = {}) {
   if (options.apiRoutes) {
     const heartbeatRoutes = options.apiRoutes.filter((r) => r.path === HEARTBEAT_PATH);
     const restRoutes = options.apiRoutes.filter((r) => r.path !== HEARTBEAT_PATH);
-    mountRouteEntries(app, heartbeatRoutes);
+    mountRouteEntries(heartbeatApp, heartbeatRoutes);
     const count = mountRouteEntries(main, restRoutes);
     console.log(`Mounted ${count} umami route handlers from route-manifest.generated.ts`);
   } else {
-    await mountUmamiRoutes(main, app);
+    await mountUmamiRoutes(main, heartbeatApp);
   }
 
   if (options.collectRoutes) {

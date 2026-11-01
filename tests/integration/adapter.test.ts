@@ -128,8 +128,17 @@ describe("mount.ts: tracker script", () => {
 
 describe("app.ts: cross-cutting plugins are actually wired", () => {
   it("applies CORS headers", async () => {
-    const res = await request("/api/heartbeat");
+    // Not /api/heartbeat: on Elysia 2 it is answered by an outer wrap before
+    // main's plugins run (app.ts's createApp), so it carries no CORS headers
+    // — fine, its only caller is a same-host healthcheck `curl`.
+    const res = await request("/api/websites");
     expect(res.headers.get("access-control-allow-origin")).toBeTruthy();
+  });
+
+  it("keeps heartbeat outside the plugin stack (no logger, no rate limit)", async () => {
+    const res = await request("/api/heartbeat");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("ratelimit-limit")).toBeNull();
   });
 
   it("applies rate-limit headers", async () => {
